@@ -1,4 +1,4 @@
-name: Build A15 ZumaPro Kernel copilot edition
+name: Copilot build ZumaPro Kernel @ A15 
 
 on:
   workflow_dispatch:
@@ -25,9 +25,6 @@ jobs:
 
       - name: Set CONFIG Environment Variable
         run: echo "CONFIG=android_kernel_google_zumapro" >> $GITHUB_ENV
-        
-      - name: Fix permissions
-        run: sudo chmod -R 777 ${{ github.workspace }}
 
       - name: Clone AnyKernel3 and Other Dependencies
         run: |
@@ -46,6 +43,15 @@ jobs:
     needs: prepare-environment
 
     steps:
+      - name: Check and create CONFIG directory
+        run: |
+          if [ ! -d "$CONFIG" ]; then
+            mkdir -p "$CONFIG/drivers"
+            echo "Created $CONFIG/drivers directory"
+          else
+            echo "$CONFIG directory already exists"
+          fi
+
       - name: Add KernelSU
         run: |
           cd "$CONFIG"
