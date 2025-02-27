@@ -25,6 +25,9 @@ jobs:
 
       - name: Set CONFIG Environment Variable
         run: echo "CONFIG=android_kernel_google_zumapro" >> $GITHUB_ENV
+        
+      - name: Fix permissions
+        run: sudo chmod -R 777 ${{ github.workspace }}
 
       - name: Clone AnyKernel3 and Other Dependencies
         run: |
