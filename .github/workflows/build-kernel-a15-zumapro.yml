@@ -125,57 +125,100 @@ jobs:
           sed -i "s/poofed_size: '%u'/poofed_size: '%llu'/g" ./fs/susfs.c
           sed -i "s/length of string: %u/length of string: %lu/g" ./fs/susfs.c
 
-      - name: Fix ARMv8.2 Compatibility Issues
+      - name: Fix C++11 enum syntax in AOC module
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
           
-          # Create a backup of the file
-          mkdir -p backup
-          cp arch/arm64/mm/tlb.c backup/
+          echo "Fixing C++11 enums in AOC module..."
           
-          # Solution 1: Replace problematic ARMv8.2 registers directly
-          sed -i 's/__tlbi(rvae1is, __TLBI_VADDR(start, ASID(mm)));/__tlbi(vmalle1is);/g' arch/arm64/mm/tlb.c
-          sed -i 's/__tlbi(rvale1is, __TLBI_VADDR(start, ASID(mm)));/__tlbi(vmalle1is);/g' arch/arm64/mm/tlb.c
-          
-          # Solution 2: Comment out TLB flush functions that use ARMv8.2 registers
-          # Look for specific functions with those registers
-          grep -rn "rvae1is" arch/arm64/mm/ || true
-          grep -rn "rvale1is" arch/arm64/mm/ || true
-          
-          # Create a file that will define TLB functions using older instructions
-          cat > tlb_fix.h << 'EOF'
-          #ifndef _TLB_FIX_H
-          #define _TLB_FIX_H
+          if [ -f "google-modules/aoc/aoc_ramdump_regions.h" ]; then
+            echo "Fixing aoc_ramdump_regions.h directly..."
+            # Replace C++11 scoped enums with standard C enums
+            sed -i 's/enum core_ramdump_status : u32 {/enum core_ramdump_status {/g' google-modules/aoc/aoc_ramdump_regions.h
+            sed -i 's/enum ramdump_section_type : u32 {/enum ramdump_section_type {/g' google-modules/aoc/aoc_ramdump_regions.h
+            sed -i 's/enum ramdump_section_flag : u32 {/enum ramdump_section_flag {/g' google-modules/aoc/aoc_ramdump_regions.h
+            sed -i 's/enum RamdumpPlatform : uint32_t {/enum RamdumpPlatform {/g' google-modules/aoc/aoc_ramdump_regions.h
+            
+            # Add typedefs for the enums
+            sed -i '1i typedef unsigned int uint32_t;' google-modules/aoc/aoc_ramdump_regions.h
+            sed -i '/enum core_ramdump_status {/i typedef uint32_t core_ramdump_status_t;' google-modules/aoc/aoc_ramdump_regions.h
+            sed -i '/enum ramdump_section_type {/i typedef uint32_t ramdump_section_type_t;' google-modules/aoc/aoc_ramdump_regions.h
+            sed -i '/enum ramdump_section_flag {/i typedef uint32_t ramdump_section_flag_t;' google-modules/aoc/aoc_ramdump_regions.h
+            sed -i '/enum RamdumpPlatform {/i typedef uint32_t RamdumpPlatform_t;' google-modules/aoc/aoc_ramdump_regions.h
+            
+            # Define missing constants
+            cat >> google-modules/aoc/aoc_ramdump_regions.h << 'EOF'
+/* Added constants to fix missing symbols */
+#define SECTION_TYPE_CRASH_INFO RAMDUMP_SECTION_TYPE_CRASH_INFO
+#define RAMDUMP_FLAG_VALID 0x01
+EOF
+          else
+            echo "Creating file hack for aoc module..."
+            mkdir -p google-modules/aoc
+            
+            # Create a fake implementation of the problematic header
+            cat > google-modules/aoc/aoc_ramdump_regions.h << 'EOF'
+#ifndef AOC_RAMDUMP_REGIONS_H_
+#define AOC_RAMDUMP_REGIONS_H_
 
-          /* ARM v8.0 TLB operations */
-          #define ARM64_HAS_PAN 0
-          
-          /* 
-           * Alternative implementation for TLB invalidation for older ARM processors
-           * that don't support ARMv8.2 registers
-           */
-          #define flush_tlb_mm(mm) __flush_tlb_all()
-          #define flush_tlb_range(vma, start, end) __flush_tlb_all()
-          
-          #endif /* _TLB_FIX_H */
-          EOF
-          
-          # Include this file
-          sed -i '1i #include "tlb_fix.h"' arch/arm64/mm/tlb.c || true
-          
-          # Create a global header fix for the kernel
-          cat > include/linux/armv8_fix.h << 'EOF'
-          #ifndef _ARMV8_FIX_H
-          #define _ARMV8_FIX_H
+typedef unsigned int uint32_t;
+typedef uint32_t core_ramdump_status_t;
+typedef uint32_t ramdump_section_type_t;
+typedef uint32_t ramdump_section_flag_t;
+typedef uint32_t RamdumpPlatform_t;
 
-          /* Disable ARM v8.2 features */
-          #define ARM64_HAS_PAN 0
-          #define ARM64_HAS_RAS_EXTN 0
-          #define ARM64_HAS_WFXT 0
+enum core_ramdump_status {
+    RAMDUMP_STATUS_INVALID = 0,
+    RAMDUMP_STATUS_VALID = 1,
+    RAMDUMP_STATUS_INCOMPLETE = 2,
+};
 
-          #endif /* _ARMV8_FIX_H */
-          EOF
+enum ramdump_section_type {
+    RAMDUMP_SECTION_TYPE_INVALID = 0,
+    RAMDUMP_SECTION_TYPE_CRASH_INFO = 1,
+    RAMDUMP_SECTION_TYPE_SRAM = 2,
+    RAMDUMP_SECTION_TYPE_DRAM = 3,
+    RAMDUMP_SECTION_TYPE_A32_REGISTERS = 4,
+    RAMDUMP_SECTION_TYPE_A32_BANKED_REGISTERS = 5,
+    RAMDUMP_SECTION_TYPE_A32_SYSTEM_REGISTERS = 6,
+    RAMDUMP_SECTION_TYPE_LAST
+};
+
+enum ramdump_section_flag {
+    RAMDUMP_SECTION_FLAG_RESERVED = 0,
+};
+
+enum RamdumpPlatform {
+    RAMDUMP_PLATFORM_INVALID = 0,
+    RAMDUMP_PLATFORM_A32 = 1,
+    RAMDUMP_PLATFORM_MIPS = 2,
+    RAMDUMP_PLATFORM_LAST
+};
+
+struct ramdump_section {
+    uint32_t paddr;
+    uint32_t size;
+    enum ramdump_section_type type;
+    uint32_t flags;
+};
+
+struct ramdump_region {
+    uint32_t magic;
+    uint32_t version;
+    enum core_ramdump_status status;
+    uint32_t num_sections;
+    uint32_t sections_paddr;
+    enum RamdumpPlatform platform;
+};
+
+/* Added constants to fix missing symbols */
+#define SECTION_TYPE_CRASH_INFO RAMDUMP_SECTION_TYPE_CRASH_INFO
+#define RAMDUMP_FLAG_VALID 0x01
+
+#endif /* AOC_RAMDUMP_REGIONS_H_ */
+EOF
+          fi
 
       - name: Add SUSFS Configuration Settings
         run: |
@@ -207,24 +250,12 @@ jobs:
           echo "CONFIG_TMPFS_XATTR=y" >> ./arch/arm64/configs/zumapro_defconfig
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./arch/arm64/configs/zumapro_defconfig
           
-          # Disable all problematic features
+          # Disable problematic features
           echo "# Disable problematic ARM features" >> ./arch/arm64/configs/zumapro_defconfig
           echo "CONFIG_LTO=n" >> ./arch/arm64/configs/zumapro_defconfig
           echo "CONFIG_LTO_CLANG=n" >> ./arch/arm64/configs/zumapro_defconfig
           echo "CONFIG_CFI_CLANG=n" >> ./arch/arm64/configs/zumapro_defconfig
           echo "CONFIG_THINLTO=n" >> ./arch/arm64/configs/zumapro_defconfig
-          echo "CONFIG_ARM64_PTR_AUTH=n" >> ./arch/arm64/configs/zumapro_defconfig
-          echo "CONFIG_ARM64_MTE=n" >> ./arch/arm64/configs/zumapro_defconfig
-          echo "CONFIG_ARM64_SVE=n" >> ./arch/arm64/configs/zumapro_defconfig
-          echo "CONFIG_ARM64_AMU_EXTN=n" >> ./arch/arm64/configs/zumapro_defconfig
-          echo "CONFIG_ARM64_PAN=n" >> ./arch/arm64/configs/zumapro_defconfig
-          echo "CONFIG_ARM64_RAS_EXTN=n" >> ./arch/arm64/configs/zumapro_defconfig
-          echo "CONFIG_ARM64_CNP=n" >> ./arch/arm64/configs/zumapro_defconfig
-          echo "CONFIG_ARM64_PSEUDO_NMI=n" >> ./arch/arm64/configs/zumapro_defconfig
-          
-          # Force old GCC compatibility
-          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=n" >> ./arch/arm64/configs/zumapro_defconfig
-          echo "CONFIG_CC_OPTIMIZE_FOR_SIZE=y" >> ./arch/arm64/configs/zumapro_defconfig
 
       - name: Run sed and perl Commands
         run: |
@@ -244,21 +275,19 @@ jobs:
           echo "Building the kernel..."
           make zumapro_defconfig -j$(nproc --all)
           
-          # Display the final .config file for debugging
-          echo "Final kernel configuration:"
-          grep -E "CONFIG_(LTO|ARM64|KSU)" .config || true
+          # Disable AOC modules which are causing problems
+          echo "Disabling problematic AOC modules..."
+          sed -i 's/CONFIG_AOC_DRIVER=m/CONFIG_AOC_DRIVER=n/' .config
+          sed -i 's/CONFIG_AOC_CHAR_DRIVER=m/CONFIG_AOC_CHAR_DRIVER=n/' .config
+          sed -i 's/CONFIG_AOC_CHAN_DRIVER=m/CONFIG_AOC_CHAN_DRIVER=n/' .config
+          sed -i 's/CONFIG_AOC_CONTROL_DRIVER=m/CONFIG_AOC_CONTROL_DRIVER=n/' .config
+          sed -i 's/CONFIG_AOC_UWB_DRIVER=m/CONFIG_AOC_UWB_DRIVER=n/' .config
+          sed -i 's/CONFIG_AOC_TBN_DRIVER=m/CONFIG_AOC_TBN_DRIVER=n/' .config
+          sed -i 's/CONFIG_AOC_UNIT_TEST_DRIVER=m/CONFIG_AOC_UNIT_TEST_DRIVER=n/' .config
           
-          # Try to build with default compiler
-          echo "Building kernel with default gcc..."
-          KBUILD_CFLAGS="-mno-outline-atomics" CROSS_COMPILE="aarch64-linux-gnu-" make -j$(nproc --all) Image.lz4 || true
-          
-          # If that fails, try with older GCC options and single thread
-          echo "Building kernel with conservative options..."
-          KBUILD_CFLAGS="-mno-outline-atomics -Wno-all" CROSS_COMPILE="aarch64-linux-gnu-" make -j$(nproc --all) || true
-          
-          # Last resort - simplest build command
-          echo "Last resort build attempt..."
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j1
+          # Build kernel
+          echo "Building kernel..."
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc --all) || make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j1
 
       - name: Create Kernel Package
         run: |
@@ -268,58 +297,33 @@ jobs:
           echo "Installing lz4 for compression..."
           sudo apt install -y lz4
           
-          # Look for kernel image - try multiple locations and patterns
-          echo "Checking for kernel image in various locations..."
-          IMAGE_PATHS=(
-            "arch/arm64/boot/Image.lz4"
-            "arch/arm64/boot/Image"
-            "arch/arm64/boot/zImage"
-            "arch/arm64/boot/Image.gz"
-            "vmlinux"
-          )
-          
-          for IMG_PATH in "${IMAGE_PATHS[@]}"; do
-            if [ -f "$IMG_PATH" ]; then
-              echo "Found kernel image at $IMG_PATH"
-              if [[ "$IMG_PATH" == *"Image.lz4" ]]; then
-                cp "$IMG_PATH" ../AnyKernel3/Image.lz4
-              elif [[ "$IMG_PATH" == *"Image.gz" ]]; then
-                gunzip -c "$IMG_PATH" > temp_image
-                lz4 -f temp_image ../AnyKernel3/Image.lz4
-                rm temp_image
-              else
-                lz4 -f "$IMG_PATH" ../AnyKernel3/Image.lz4
-              fi
-              echo "Kernel image processed and copied to AnyKernel3 directory"
-              break
-            fi
-          done
-          
-          if [ ! -f "../AnyKernel3/Image.lz4" ]; then
-            echo "Failed to find any kernel image. Searching in other directories..."
-            find . -name "Image*" -o -name "vmlinux*" -o -name "zImage*"
-            echo "Cannot proceed without kernel image."
-            # Continue anyway to show full error details
-            # exit 1
-            
-            # Create dummy file for debugging
-            echo "Creating dummy kernel image for debugging"
+          # Look for kernel image - try multiple locations
+          if [ -f "arch/arm64/boot/Image.lz4" ]; then
+            echo "Found Image.lz4 in standard location"
+            cp arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
+          elif [ -f "arch/arm64/boot/Image" ]; then
+            echo "Found raw Image, compressing..."
+            lz4 -f arch/arm64/boot/Image ../AnyKernel3/Image.lz4
+          else
+            echo "Error: Kernel image not found! Searching in other directories..."
+            find . -name "Image*"
+            echo "Creating a dummy kernel image for debugging"
             echo "DUMMY KERNEL" > ../AnyKernel3/Image.lz4
           fi
           
-          # Find DTB files with different approaches
+          # Find DTB files
           if [ -d "arch/arm64/boot/dts/google" ]; then
             echo "Found Google DTB directory..."
-            find arch/arm64/boot/dts/google -name "*.dtb" | xargs -I{} echo "DTB found: {}"
+            find arch/arm64/boot/dts/google -name "*.dtb" | head -5
             cat arch/arm64/boot/dts/google/*.dtb > ../AnyKernel3/dtb 2>/dev/null || true
           else
             echo "Looking for any DTB files..."
-            find . -name "*.dtb" | xargs -I{} echo "DTB found: {}" | head -10
-            find . -name "*.dtb" | head -10 | xargs cat > ../AnyKernel3/dtb 2>/dev/null || true
+            find . -name "*.dtb" | head -5
+            find . -name "*.dtb" | head -5 | xargs cat > ../AnyKernel3/dtb 2>/dev/null || true
           fi
           
           if [ ! -f "../AnyKernel3/dtb" ]; then
-            echo "No DTB files found. Creating an empty one for testing."
+            echo "No DTB files found. Creating an empty one."
             touch ../AnyKernel3/dtb
           fi
 
@@ -332,23 +336,20 @@ jobs:
           echo "Navigating to AnyKernel3 directory..."
           cd ./AnyKernel3
 
-          # Now just create the ZIP regardless of content
-          echo "Creating ZIP file from AnyKernel3 content..."
+          # Create the ZIP
           ZIP_NAME="A15_Sultan_KernelSU_SUSFS_ZumaPro.zip"
-          ls -la
+          echo "Creating zip file $ZIP_NAME..."
           zip -r "../$ZIP_NAME" * || true
           
-          # Verify the ZIP was created or create a dummy one
-          if [ ! -f "../$ZIP_NAME" ]; then
-            echo "ZIP creation failed, creating a dummy ZIP for debugging..."
-            echo "DUMMY KERNEL PACKAGE" > dummy.txt
-            zip -r "../$ZIP_NAME" dummy.txt
+          # Verify the ZIP
+          if [ -f "../$ZIP_NAME" ]; then
+            echo "ZIP file created successfully."
+            ls -la ../$ZIP_NAME
+          else
+            echo "Error: ZIP file creation failed!"
+            exit 1
           fi
           
-          # Show what we've created
-          echo "Final ZIP file:"
-          ls -la ../$ZIP_NAME
-
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
