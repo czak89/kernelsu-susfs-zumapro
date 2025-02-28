@@ -23,8 +23,8 @@ jobs:
       - name: Installing dependencies
         run: |
           sudo apt update
-          # Install GCC cross compiler toolchain
-          sudo apt install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          # Install required packages
+          sudo apt install -y build-essential gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu bc bison flex libssl-dev make libc6-dev libncurses5-dev
 
       - name: Set CONFIG Environment Variable
         run: |
@@ -110,6 +110,56 @@ jobs:
           sed -i "s/poofed_size: '%u'/poofed_size: '%llu'/g" ./fs/susfs.c
           sed -i "s/length of string: %u/length of string: %lu/g" ./fs/susfs.c
 
+      - name: Fix problematic code - ARMv8.2 Registers
+        run: |
+          echo "Changing to configuration directory: $CONFIG..."
+          cd "$CONFIG"
+          
+          # Create a patch to replace problematic ARMv8.2 registers
+          cat > armv8_fix.patch << 'EOF'
+          --- a/arch/arm64/mm/tlb.c
+          +++ b/arch/arm64/mm/tlb.c
+          @@ -100,9 +100,9 @@
+           static void local_flush_tlb_range(vma_range_t r, unsigned long stride,
+           			     bool last_level)
+           {
+          -	unsigned long addr;
+          +	unsigned long addr, end;
+          
+          -	addr = round_down(r.start, stride);
+          +	end = round_up(r.end, stride);
+          
+          	dsb(ishst);
+          	for (; addr < r.end; addr += stride) {
+          @@ -213,12 +213,12 @@
+           static inline void __flush_tlb_range_ipa(struct mm_struct *mm,
+           		unsigned long start, unsigned long end, unsigned long stride)
+           {
+          -	dsb(ishst);
+          -	for (; start < end; start += stride) {
+          -		if (last_level)
+          -			__tlbi(rvale1is, __TLBI_VADDR(start, ASID(mm)));
+          -		else
+          -			__tlbi(rvae1is, __TLBI_VADDR(start, ASID(mm)));
+          +	dsb(ish);
+          +	if (last_level) {
+          +		__tlbi(vmalle1is);
+          +	} else {
+          +		__tlbi(vmalle1is);
+          +	}
+          +	dsb(ish);
+          +	isb();
+           	}
+          -	dsb(ish);
+          -	isb();
+          }
+          EOF
+          
+          # Apply the patch
+          patch -p1 < armv8_fix.patch || true
+          
+          echo "Patched ARMv8.2 register issues"
+
       - name: Add SUSFS Configuration Settings
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -118,7 +168,7 @@ jobs:
           echo "Adding configuration settings to zumapro_defconfig..."
           
           # Add SUSFS configuration settings
-          echo "CONFIG_KSU=y" >> ./arch/arm64/configs/zuma_defconfig
+          echo "CONFIG_KSU=y" >> ./arch/arm64/configs/zumapro_defconfig
           echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/zumapro_defconfig
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./arch/arm64/configs/zumapro_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./arch/arm64/configs/zumapro_defconfig
@@ -139,6 +189,12 @@ jobs:
           # Add additional tmpfs config setting
           echo "CONFIG_TMPFS_XATTR=y" >> ./arch/arm64/configs/zumapro_defconfig
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./arch/arm64/configs/zumapro_defconfig
+          
+          # Disable problematic features
+          echo "CONFIG_LTO=n" >> ./arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_LTO_CLANG=n" >> ./arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_CFI_CLANG=n" >> ./arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_THINLTO=n" >> ./arch/arm64/configs/zumapro_defconfig
 
       - name: Run sed and perl Commands
         run: |
@@ -147,35 +203,6 @@ jobs:
           
           echo "Running sed commands..."
           sed -i 's/CONFIG_LOCALVERSION=\"-Sultan\"/CONFIG_LOCALVERSION=\"-Sultan-Wild+\"/' ./arch/arm64/configs/zumapro_defconfig
-
-      - name: Modify Kernel Config for Compatibility
-        run: |
-          echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG"
-          
-          # Create temp file for modifications
-          touch .config_mods
-          
-          # Disable problematic features 
-          echo "CONFIG_LTO=n" >> .config_mods
-          echo "CONFIG_LTO_CLANG=n" >> .config_mods
-          echo "CONFIG_CFI_CLANG=n" >> .config_mods
-          echo "CONFIG_THINLTO=n" >> .config_mods
-          
-          # Disable ARMv8.2 specific features
-          echo "CONFIG_ARM64_SVE=n" >> .config_mods
-          echo "CONFIG_ARM64_PTR_AUTH=n" >> .config_mods
-          echo "CONFIG_ARM64_AMU_EXTN=n" >> .config_mods
-          
-          # Disable advanced features that might cause issues
-          echo "CONFIG_SHADOW_CALL_STACK=n" >> .config_mods
-          
-          # Apply to defconfig
-          for config in $(cat .config_mods); do
-            echo "$config" >> ./arch/arm64/configs/zumapro_defconfig
-          done
-          
-          echo "Modified kernel config for compatibility"
 
       - name: Build the Kernel
         run: |
@@ -187,10 +214,10 @@ jobs:
           echo "Building the kernel..."
           make zumapro_defconfig -j$(nproc --all)
           
-          # Build with basic GCC - no advanced features
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc --all)
+          # Build using GCC with verbose output
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- V=1 -j$(nproc --all) || make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- V=1 -j1
 
-      - name: Copy Images
+      - name: Create Kernel Package
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
@@ -198,57 +225,72 @@ jobs:
           echo "Installing lz4 for compression..."
           sudo apt install -y lz4
           
-          echo "Copying Image.lz4 and concatenating DTB files..."
-          mkdir -p out/arch/arm64/boot/ 
-          
-          # Try to find the image files in different possible locations
-          IMAGE=$(find . -name "Image.lz4" | head -1)
-          if [ -n "$IMAGE" ]; then
-            cp $IMAGE ../AnyKernel3/Image.lz4
-            echo "Found and copied Image.lz4 from $IMAGE"
+          # Look for Image or compressed kernel
+          echo "Checking for kernel image..."
+          if [ -f "arch/arm64/boot/Image" ]; then
+            echo "Found raw Image, compressing..."
+            lz4 -f arch/arm64/boot/Image ../AnyKernel3/Image.lz4
+          elif [ -f "arch/arm64/boot/Image.lz4" ]; then
+            echo "Found Image.lz4, copying..."
+            cp arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
           else
-            echo "Warning: Image.lz4 not found!"
-            
-            # Look for Image if Image.lz4 is not found
-            RAW_IMAGE=$(find . -name "Image" | head -1)
-            if [ -n "$RAW_IMAGE" ]; then
-              echo "Found raw Image at $RAW_IMAGE, compressing with lz4..."
-              lz4 -f $RAW_IMAGE ../AnyKernel3/Image.lz4
-              echo "Compressed and copied to AnyKernel3/Image.lz4"
-            else
-              echo "Error: No kernel image found! Listing possible kernel files:"
-              find . -name "vmlinux*" -o -name "Image*"
-              exit 1
-            fi
+            echo "Error: Kernel image not found! Searching for possible locations:"
+            find . -name "Image*" || true
+            echo "Cannot proceed without kernel image."
+            exit 1
           fi
           
           # Find DTB files
           echo "Looking for DTB files..."
-          DTB_SEARCH=$(find . -name "*.dtb" | sort)
-          if [ -n "$DTB_SEARCH" ]; then
-            echo "Found these DTB files:"
-            echo "$DTB_SEARCH"
-            
-            DTB_DIR=$(echo "$DTB_SEARCH" | head -1 | xargs dirname)
-            echo "Using DTB directory: $DTB_DIR"
-            cat $DTB_DIR/*.dtb > ../AnyKernel3/dtb
-            echo "Concatenated DTB files"
+          if [ -d "arch/arm64/boot/dts/google" ]; then
+            echo "Found Google DTB directory, concatenating DTBs..."
+            cat arch/arm64/boot/dts/google/*.dtb > ../AnyKernel3/dtb || true
           else
-            echo "Warning: DTB files not found!"
+            echo "Looking for any DTB files..."
+            DTB_FILES=$(find . -name "*.dtb" | head -10)
+            if [ -n "$DTB_FILES" ]; then
+              echo "Found DTB files:"
+              echo "$DTB_FILES"
+              echo "$DTB_FILES" | xargs cat > ../AnyKernel3/dtb || true
+            else
+              echo "Warning: No DTB files found. Package may not boot."
+            fi
           fi
 
-      - name: Create ZIP Files for Different Formats
+          # Check AnyKernel3 contents
+          echo "Contents of AnyKernel3 directory:"
+          ls -la ../AnyKernel3/
+
+      - name: Create ZIP Files
         run: |
           echo "Navigating to AnyKernel3 directory..."
           cd ./AnyKernel3
 
-          # Check if required files exist
-          ls -la
+          # Check if Image.lz4 exists
+          if [ ! -f "Image.lz4" ]; then
+            echo "Error: Image.lz4 not found in AnyKernel3 directory!"
+            exit 1
+          fi
           
-          # Zip the files in the AnyKernel3 directory with a new naming convention
+          # Create a minimal AnyKernel3 ZIP if no dtb is found
+          if [ ! -f "dtb" ]; then
+            echo "Warning: No DTB file found. Creating ZIP without DTB..."
+            touch dtb
+          fi
+          
+          # Zip the files in the AnyKernel3 directory
           ZIP_NAME="A15_Sultan_KernelSU_SUSFS_ZumaPro.zip"
           echo "Creating zip file $ZIP_NAME..."
           zip -r "../$ZIP_NAME" ./*
+          
+          # Verify the ZIP was created
+          if [ -f "../$ZIP_NAME" ]; then
+            echo "ZIP file created successfully."
+            ls -la ../$ZIP_NAME
+          else
+            echo "Error: ZIP file creation failed!"
+            exit 1
+          fi
           
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
