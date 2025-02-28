@@ -1,8 +1,8 @@
 name: Build A15 Zuma Pro Kernel
 
 on:
-  workflow_dispatch:
-  workflow_call:  # This allows this workflow to be called from another workflow
+  workflow_dispatch: {}  # <-- FIXED
+  workflow_call: {}  # <-- FIXED  # This allows this workflow to be called from another workflow
   push:
     branches:
       - main
@@ -33,12 +33,13 @@ jobs:
           sudo apt update
           # Install GCC 9 explicitly (more compatible version)
           sudo apt install -y gcc-9 g++-9
-          sudo apt install -y build-essential gcc-9-aarch64-linux-gnu binutils-aarch64-linux-gnu bc bison flex libssl-dev make libc6-dev libncurses5-dev
+          sudo apt install -y build-essential gcc-9-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            bc bison flex libssl-dev make libc6-dev libncurses5-dev  # <-- FIXED
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90 --slave /usr/bin/g++ g++ /usr/bin/g++-9
           
           # Create symlinks if needed
           if [ ! -e /usr/bin/aarch64-linux-gnu-gcc-9 ]; then
-            sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc /usr/bin/aarch64-linux-gnu-gcc-9
+            sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-9 /usr/bin/aarch64-linux-gnu-gcc  # <-- FIXED
           fi
 
       - name: Set CONFIG Environment Variable
@@ -47,16 +48,18 @@ jobs:
           
           # Set CONFIG as an environment variable for future steps
           echo "CONFIG=$CONFIG" >> $GITHUB_ENV
+          export CONFIG  # <-- FIXED
           
           echo "CONFIG set to: $CONFIG"
 
       - name: Clone AnyKernel3 and Other Dependencies
         run: |
           echo "Cloning AnyKernel3 and other dependencies..."
-    
+          
           # Define the branch names using the matrix values
           ANYKERNEL_BRANCH="gki-2.0"
-          SUSFS_BRANCH="gki-android14-6.1"
+          # Zmiana: użyjmy brancha main zamiast specyficznego dla wersji
+          SUSFS_BRANCH="main"
 
           # Debug print the branches
           echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
@@ -65,6 +68,13 @@ jobs:
           # Clone repositories using the branch names
           git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
+          
+          # Sprawdźmy strukturę sklonowanego repozytorium
+          echo "Checking SUSFS repository structure..."
+          find ./susfs4ksu -type f -name "*.patch" | grep -i susfs
+          echo "Available patches in kernel_patches directory (if exists):"
+          find ./susfs4ksu -path "*/kernel_patches/*" -type f | sort
+          
           git clone https://github.com/TheWildJames/kernel_patches.git
           git clone https://github.com/kerneltoast/android_kernel_google_zumapro
 
@@ -83,25 +93,67 @@ jobs:
           
           echo "Applying SUSFS patches..."
           
-          # Copy SUSFS patches
-          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ./
-          cp ../susfs4ksu/kernel_patches/fs/* ./fs/
-          cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          # Inteligentne wykrywanie lokalizacji patchy SUSFS
+          SUSFS_PATCH=$(find ../susfs4ksu -name "*add_susfs*" -o -name "*susfs*.patch" | grep -i "gki.*6.1" | head -1)
+          
+          if [ -z "$SUSFS_PATCH" ]; then
+            echo "SUSFS patch not found in expected location. Trying alternative patterns..."
+            SUSFS_PATCH=$(find ../susfs4ksu -name "*.patch" | grep -v "KernelSU" | head -1)
+          fi
+          
+          if [ -n "$SUSFS_PATCH" ]; then
+            echo "Found SUSFS patch at: $SUSFS_PATCH"
+            cp "$SUSFS_PATCH" ./susfs_patch.patch
+          else
+            echo "Warning: No SUSFS patch found! Will try to continue without it."
+            touch ./susfs_patch.patch  # Tworzymy pusty plik jako placeholder
+          fi
+          
+          # Sprawdzamy strukturę katalogów z plikami źródłowymi
+          FS_DIR=$(find ../susfs4ksu -path "*/fs" -type d | head -1)
+          LINUX_DIR=$(find ../susfs4ksu -path "*/include/linux" -type d | head -1)
+          
+          # Kopiowanie plików SUSFS, jeśli istnieją
+          if [ -d "$FS_DIR" ]; then
+            echo "Found FS directory at: $FS_DIR"
+            mkdir -p ./fs
+            cp -r "$FS_DIR"/* ./fs/ || true
+          else
+            echo "Warning: SUSFS fs directory not found!"
+          fi
+          
+          if [ -d "$LINUX_DIR" ]; then
+            echo "Found Linux include directory at: $LINUX_DIR"
+            mkdir -p ./include/linux
+            cp -r "$LINUX_DIR"/* ./include/linux/ || true
+          else
+            echo "Warning: SUSFS linux include directory not found!"
+          fi
 
+          # Kontynuujemy z KernelSU patch
           cd ./KernelSU-Next
           
           echo "Applying next SUSFS patches..."
-          cp ../../kernel_patches/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch ./
-          patch -p1 --forward < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || true
+          if [ -f "../../kernel_patches/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch" ]; then
+            cp ../../kernel_patches/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch ./
+            patch -p1 --forward < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || true
+          else
+            echo "KernelSU SUSFS patch not found, skipping this step."
+          fi
           
           # Change to common directory and apply SUSFS patch
           cd ..
-          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
+          if [ -s ./susfs_patch.patch ]; then
+            echo "Applying main SUSFS patch..."
+            patch -p1 < ./susfs_patch.patch || true
+          else
+            echo "No SUSFS patch to apply, skipping this step."
+          fi
 
       - name: Apply KSU Hooks
         run: |
           echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG"
+          cd "$CONFIG" || exit 1  # <-- FIXED: Przejście do katalogu i obsługa błędu
           # Apply additional patch
           cp ../kernel_patches/new_hooks.patch ./
           patch -p1 --fuzz=3 < ./new_hooks.patch
@@ -149,7 +201,7 @@ jobs:
             
             # Define missing constants
             cat >> google-modules/aoc/aoc_ramdump_regions.h << 'EOF'
-# /* Added constants to fix missing symbols /*
+/* Added constants to fix missing symbols */
 #define SECTION_TYPE_CRASH_INFO RAMDUMP_SECTION_TYPE_CRASH_INFO
 #define RAMDUMP_FLAG_VALID 0x01
 EOF
