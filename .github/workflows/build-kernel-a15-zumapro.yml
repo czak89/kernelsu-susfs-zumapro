@@ -201,7 +201,6 @@ jobs:
             
             # Define missing constants
             cat >> google-modules/aoc/aoc_ramdump_regions.h << 'EOF'
-/* Added constants to fix missing symbols */
 #define SECTION_TYPE_CRASH_INFO RAMDUMP_SECTION_TYPE_CRASH_INFO
 #define RAMDUMP_FLAG_VALID 0x01
 EOF
