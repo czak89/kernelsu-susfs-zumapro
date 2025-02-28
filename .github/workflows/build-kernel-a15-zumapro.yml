@@ -3,6 +3,11 @@ name: Build A15 Zuma Pro Kernel
 on:
   workflow_dispatch:
   workflow_call:  # This allows this workflow to be called from another workflow
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-kernel-a15-zumapro.yml'  # Only trigger on changes to this file
   
 jobs:
   build-kernel-a15-zumapro-kernelsu-susfs:
