@@ -23,8 +23,8 @@ jobs:
       - name: Installing dependencies
         run: |
           sudo apt update
-          # Install clang and lld instead of gcc-aarch64-linux-gnu
-          sudo apt install -y clang lld gcc build-essential binutils-aarch64-linux-gnu
+          # Install clang, lld, and other necessary tools
+          sudo apt install -y clang-14 lld-14 gcc build-essential binutils-aarch64-linux-gnu
 
       - name: Set CONFIG Environment Variable
         run: |
@@ -110,17 +110,6 @@ jobs:
           sed -i "s/poofed_size: '%u'/poofed_size: '%llu'/g" ./fs/susfs.c
           sed -i "s/length of string: %u/length of string: %lu/g" ./fs/susfs.c
 
-                                                                                            
-                                                   
-                                                                                            
-                                                   
-                                                                                          
-                                                  
-
-
-                                                                                                  
-                                                                               
-
       - name: Add SUSFS Configuration Settings
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -169,10 +158,17 @@ jobs:
           echo "Building the kernel..."
           make zumapro_defconfig -j$(nproc --all)
           
-          # Use clang instead of GCC for building
+          # Create a wrapper script for clang to add the target architecture flags
+          echo '#!/bin/bash' > clang-wrapper.sh
+          echo 'clang-14 -march=armv8.2-a+crypto+dotprod "$@"' >> clang-wrapper.sh
+          chmod +x clang-wrapper.sh
+          
+          # Use clang instead of GCC for building with specific ARM architecture flags
+          # Adding flags specifically for Tensor 4 processor
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-          CC=clang LD=ld.lld \
+          CC=$(pwd)/clang-wrapper.sh LD=ld.lld-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
+          KCFLAGS="-mcpu=cortex-a78 -DCONFIG_ARM64_REG_REBALANCE_ON -DCONFIG_ARM64_PAN" \
           -j$(nproc --all)
 
       - name: Copy Images
@@ -190,6 +186,17 @@ jobs:
             echo "Found and copied Image.lz4 from $IMAGE"
           else
             echo "Warning: Image.lz4 not found!"
+            
+            # Look for Image if Image.lz4 is not found
+            RAW_IMAGE=$(find . -name "Image" | head -1)
+            if [ -n "$RAW_IMAGE" ]; then
+              echo "Found raw Image at $RAW_IMAGE, compressing with lz4..."
+              lz4 -f $RAW_IMAGE ../AnyKernel3/Image.lz4
+              echo "Compressed and copied to AnyKernel3/Image.lz4"
+            else
+              echo "Error: No kernel image found!"
+              exit 1
+            fi
           fi
           
           DTB_DIR=$(find . -name "*.dtb" -exec dirname {} \; | head -1)
