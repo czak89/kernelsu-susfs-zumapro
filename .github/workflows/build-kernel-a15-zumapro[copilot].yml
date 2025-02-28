@@ -49,6 +49,9 @@ jobs:
     needs: prepare-environment
 
     steps:
+      - name: Ensure CONFIG directory exists
+        run: mkdir -p ${{ github.workspace }}/$CONFIG/drivers
+
       - name: Add KernelSU
         run: |
           cd "$CONFIG"
