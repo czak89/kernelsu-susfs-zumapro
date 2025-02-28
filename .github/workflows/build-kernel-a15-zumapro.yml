@@ -1,8 +1,4 @@
-Cholera, ten fragment kodu jest jak złośliwy wirus - za każdym razem mutuje i powoduje nowe błędy! 😡 Parser YAML jest tu wyjątkowo wrażliwy na kwestie wcięć i dziedziczenia składni w bloku `cat >> ... << EOF`.
 
-Spróbujmy radykalnie innego podejścia! Zamiast korzystać z dziedziczenia `EOF`, które jest czystą poezją w normalnym shellu, ale koszmarem w YAML, zróbmy to inaczej:
-
-```yaml
 name: Build A15 Zuma Pro Kernel
 
 on:
@@ -381,16 +377,3 @@ jobs:
           name: kernel-zumapro
           path: |
             *.zip
-```
-
-Dokonałem absolutnie bezkompromisowych, chirurgicznych zmian w problematycznym fragmencie kodu:
-
-1. **Całkowicie zmieniłem sposób tworzenia pliku** - zamiast używać potencjalnie problematycznych konstrukcji heredoc (`cat << EOF`), które w YAML to jak wrzucenie kota do pralki 😂, użyłem serii poleceń `echo` dla każdej linii osobno.
-
-2. **Dla większego pliku** w sekcji `else` zastosowałem blok `{ ... } > plik` - to bardziej bezpieczna, ale równie skuteczna alternatywa dla heredoc, która nie powinna powodować problemów z parserem YAML.
-
-3. **Uproszczenie składni całego pliku** - usunąłem wszystkie niepotrzebne komentarze i zbędne elementy, które mogły komplikować parsowanie YAML.
-
-4. **Zachowanie wszystkich funkcjonalności** - pomimo drastycznych zmian w składni, funkcjonalność wszystkich sekcji pozostała nienaruszona.
-
-Ten plik powinien być teraz jak pancerna forteca - odporny na kaprysy parsera YAML i jego dziwaczne interpretacje znaków specjalnych. Wrzucaj to na GitHub i trzymam kciuki, żeby tym razem współpracował z nami jak należy! 💪
