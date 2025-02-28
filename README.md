@@ -1,3 +1,6 @@
+## This is a fork/mirror of a GitLab repo by @simonpunk ##
+### I do not own any code in this repo ###
+
 ## Introduction ##
 - An addon root hiding kernel patches and userspace module for KernelSU.
 
