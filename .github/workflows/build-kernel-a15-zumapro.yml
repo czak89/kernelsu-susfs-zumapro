@@ -6,7 +6,7 @@ on:
   
 jobs:
   build-kernel-a15-zumapro-kernelsu-susfs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04  # Use older Ubuntu for better GCC compatibility
 
     steps:
       - name: Maximize build space
@@ -23,8 +23,8 @@ jobs:
       - name: Installing dependencies
         run: |
           sudo apt update
-          # Install clang and lld
-          sudo apt install -y clang lld gcc build-essential binutils-aarch64-linux-gnu libc++-dev
+          # Install GCC cross compiler toolchain
+          sudo apt install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
       - name: Set CONFIG Environment Variable
         run: |
@@ -148,22 +148,34 @@ jobs:
           echo "Running sed commands..."
           sed -i 's/CONFIG_LOCALVERSION=\"-Sultan\"/CONFIG_LOCALVERSION=\"-Sultan-Wild+\"/' ./arch/arm64/configs/zumapro_defconfig
 
-      - name: Prepare Compilation Environment
+      - name: Modify Kernel Config for Compatibility
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
           
-          # Disable LTO to avoid issues with complex ARM instructions
-          sed -i "s/CONFIG_LTO=y/CONFIG_LTO=n/" ./arch/arm64/configs/zumapro_defconfig
-          sed -i "s/CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/" ./arch/arm64/configs/zumapro_defconfig
-          sed -i "s/CONFIG_THINLTO=y/CONFIG_THINLTO=n/" ./arch/arm64/configs/zumapro_defconfig
-
-          # Create a simple script for adding ARM architecture flags
-          cat > arch-wrapper.sh << 'EOF'
-          #!/bin/bash
-          exec "$@" -march=armv8.2-a+crypto
-          EOF
-          chmod +x arch-wrapper.sh
+          # Create temp file for modifications
+          touch .config_mods
+          
+          # Disable problematic features 
+          echo "CONFIG_LTO=n" >> .config_mods
+          echo "CONFIG_LTO_CLANG=n" >> .config_mods
+          echo "CONFIG_CFI_CLANG=n" >> .config_mods
+          echo "CONFIG_THINLTO=n" >> .config_mods
+          
+          # Disable ARMv8.2 specific features
+          echo "CONFIG_ARM64_SVE=n" >> .config_mods
+          echo "CONFIG_ARM64_PTR_AUTH=n" >> .config_mods
+          echo "CONFIG_ARM64_AMU_EXTN=n" >> .config_mods
+          
+          # Disable advanced features that might cause issues
+          echo "CONFIG_SHADOW_CALL_STACK=n" >> .config_mods
+          
+          # Apply to defconfig
+          for config in $(cat .config_mods); do
+            echo "$config" >> ./arch/arm64/configs/zumapro_defconfig
+          done
+          
+          echo "Modified kernel config for compatibility"
 
       - name: Build the Kernel
         run: |
@@ -175,23 +187,19 @@ jobs:
           echo "Building the kernel..."
           make zumapro_defconfig -j$(nproc --all)
           
-          # Use Clang for building with specific ARM architecture flags
-          # Using standard clang/lld instead of version-specific ones
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-          CC="$(pwd)/arch-wrapper.sh clang" LD=ld.lld \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          -j$(nproc --all)
+          # Build with basic GCC - no advanced features
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc --all)
 
       - name: Copy Images
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
 
+          echo "Installing lz4 for compression..."
+          sudo apt install -y lz4
+          
           echo "Copying Image.lz4 and concatenating DTB files..."
           mkdir -p out/arch/arm64/boot/ 
-          
-          # Install lz4 if needed for compression
-          sudo apt install -y lz4 || true
           
           # Try to find the image files in different possible locations
           IMAGE=$(find . -name "Image.lz4" | head -1)
@@ -208,19 +216,25 @@ jobs:
               lz4 -f $RAW_IMAGE ../AnyKernel3/Image.lz4
               echo "Compressed and copied to AnyKernel3/Image.lz4"
             else
-              echo "Error: No kernel image found!"
+              echo "Error: No kernel image found! Listing possible kernel files:"
+              find . -name "vmlinux*" -o -name "Image*"
               exit 1
             fi
           fi
           
-          DTB_DIR=$(find . -name "*.dtb" -exec dirname {} \; | sort | uniq | head -1)
-          if [ -n "$DTB_DIR" ]; then
+          # Find DTB files
+          echo "Looking for DTB files..."
+          DTB_SEARCH=$(find . -name "*.dtb" | sort)
+          if [ -n "$DTB_SEARCH" ]; then
+            echo "Found these DTB files:"
+            echo "$DTB_SEARCH"
+            
+            DTB_DIR=$(echo "$DTB_SEARCH" | head -1 | xargs dirname)
+            echo "Using DTB directory: $DTB_DIR"
             cat $DTB_DIR/*.dtb > ../AnyKernel3/dtb
-            echo "Found and concatenated DTB files from $DTB_DIR"
+            echo "Concatenated DTB files"
           else
             echo "Warning: DTB files not found!"
-            # Last resort - look for DTB files anywhere
-            find . -name "*.dtb" | sort | head -5 | xargs -I{} echo "Found DTB: {}"
           fi
 
       - name: Create ZIP Files for Different Formats
@@ -228,6 +242,9 @@ jobs:
           echo "Navigating to AnyKernel3 directory..."
           cd ./AnyKernel3
 
+          # Check if required files exist
+          ls -la
+          
           # Zip the files in the AnyKernel3 directory with a new naming convention
           ZIP_NAME="A15_Sultan_KernelSU_SUSFS_ZumaPro.zip"
           echo "Creating zip file $ZIP_NAME..."
