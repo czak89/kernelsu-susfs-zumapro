@@ -22,7 +22,9 @@ jobs:
 
       - name: Installing dependencies
         run: |
-          sudo apt install -y gcc-aarch64-linux-gnu
+          sudo apt update
+          # Install clang and lld instead of gcc-aarch64-linux-gnu
+          sudo apt install -y clang lld gcc build-essential binutils-aarch64-linux-gnu
 
       - name: Set CONFIG Environment Variable
         run: |
@@ -115,7 +117,7 @@ jobs:
                                                                                           
                                                   
 
-      
+
                                                                                                   
                                                                                
 
@@ -155,7 +157,7 @@ jobs:
           cd "$CONFIG"
           
           echo "Running sed commands..."
-          sed -i 's/CONFIG_LOCALVERSION="-Sultan"/CONFIG_LOCALVERSION="-Sultan-Wild+"/' ./arch/arm64/configs/zumapro_defconfig
+          sed -i 's/CONFIG_LOCALVERSION=\"-Sultan\"/CONFIG_LOCALVERSION=\"-Sultan-Wild+\"/' ./arch/arm64/configs/zumapro_defconfig
 
       - name: Build the Kernel
         run: |
@@ -166,7 +168,12 @@ jobs:
           
           echo "Building the kernel..."
           make zumapro_defconfig -j$(nproc --all)
-          make -j$(nproc --all)
+          
+          # Use clang instead of GCC for building
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+          CC=clang LD=ld.lld \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          -j$(nproc --all)
 
       - name: Copy Images
         run: |
@@ -174,8 +181,24 @@ jobs:
           cd "$CONFIG"
 
           echo "Copying Image.lz4 and concatenating DTB files..."
-          cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
-          cat ./out/google-modules/soc/gs/arch/arm64/boot/dts/google/*.dtb > ../AnyKernel3/dtb
+          mkdir -p out/arch/arm64/boot/ 
+          
+          # Try to find the image files in different possible locations
+          IMAGE=$(find . -name "Image.lz4" | head -1)
+          if [ -n "$IMAGE" ]; then
+            cp $IMAGE ../AnyKernel3/Image.lz4
+            echo "Found and copied Image.lz4 from $IMAGE"
+          else
+            echo "Warning: Image.lz4 not found!"
+          fi
+          
+          DTB_DIR=$(find . -name "*.dtb" -exec dirname {} \; | head -1)
+          if [ -n "$DTB_DIR" ]; then
+            cat $DTB_DIR/*.dtb > ../AnyKernel3/dtb
+            echo "Found and concatenated DTB files from $DTB_DIR"
+          else
+            echo "Warning: DTB files not found!"
+          fi
 
       - name: Create ZIP Files for Different Formats
         run: |
