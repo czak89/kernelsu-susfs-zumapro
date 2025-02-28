@@ -23,8 +23,8 @@ jobs:
       - name: Installing dependencies
         run: |
           sudo apt update
-          # Install clang, lld, and other necessary tools
-          sudo apt install -y clang-14 lld-14 gcc build-essential binutils-aarch64-linux-gnu
+          # Install clang and lld
+          sudo apt install -y clang lld gcc build-essential binutils-aarch64-linux-gnu libc++-dev
 
       - name: Set CONFIG Environment Variable
         run: |
@@ -148,6 +148,23 @@ jobs:
           echo "Running sed commands..."
           sed -i 's/CONFIG_LOCALVERSION=\"-Sultan\"/CONFIG_LOCALVERSION=\"-Sultan-Wild+\"/' ./arch/arm64/configs/zumapro_defconfig
 
+      - name: Prepare Compilation Environment
+        run: |
+          echo "Changing to configuration directory: $CONFIG..."
+          cd "$CONFIG"
+          
+          # Disable LTO to avoid issues with complex ARM instructions
+          sed -i "s/CONFIG_LTO=y/CONFIG_LTO=n/" ./arch/arm64/configs/zumapro_defconfig
+          sed -i "s/CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/" ./arch/arm64/configs/zumapro_defconfig
+          sed -i "s/CONFIG_THINLTO=y/CONFIG_THINLTO=n/" ./arch/arm64/configs/zumapro_defconfig
+
+          # Create a simple script for adding ARM architecture flags
+          cat > arch-wrapper.sh << 'EOF'
+          #!/bin/bash
+          exec "$@" -march=armv8.2-a+crypto
+          EOF
+          chmod +x arch-wrapper.sh
+
       - name: Build the Kernel
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -158,17 +175,11 @@ jobs:
           echo "Building the kernel..."
           make zumapro_defconfig -j$(nproc --all)
           
-          # Create a wrapper script for clang to add the target architecture flags
-          echo '#!/bin/bash' > clang-wrapper.sh
-          echo 'clang-14 -march=armv8.2-a+crypto+dotprod "$@"' >> clang-wrapper.sh
-          chmod +x clang-wrapper.sh
-          
-          # Use clang instead of GCC for building with specific ARM architecture flags
-          # Adding flags specifically for Tensor 4 processor
+          # Use Clang for building with specific ARM architecture flags
+          # Using standard clang/lld instead of version-specific ones
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-          CC=$(pwd)/clang-wrapper.sh LD=ld.lld-14 \
+          CC="$(pwd)/arch-wrapper.sh clang" LD=ld.lld \
           CLANG_TRIPLE=aarch64-linux-gnu- \
-          KCFLAGS="-mcpu=cortex-a78 -DCONFIG_ARM64_REG_REBALANCE_ON -DCONFIG_ARM64_PAN" \
           -j$(nproc --all)
 
       - name: Copy Images
@@ -178,6 +189,9 @@ jobs:
 
           echo "Copying Image.lz4 and concatenating DTB files..."
           mkdir -p out/arch/arm64/boot/ 
+          
+          # Install lz4 if needed for compression
+          sudo apt install -y lz4 || true
           
           # Try to find the image files in different possible locations
           IMAGE=$(find . -name "Image.lz4" | head -1)
@@ -199,12 +213,14 @@ jobs:
             fi
           fi
           
-          DTB_DIR=$(find . -name "*.dtb" -exec dirname {} \; | head -1)
+          DTB_DIR=$(find . -name "*.dtb" -exec dirname {} \; | sort | uniq | head -1)
           if [ -n "$DTB_DIR" ]; then
             cat $DTB_DIR/*.dtb > ../AnyKernel3/dtb
             echo "Found and concatenated DTB files from $DTB_DIR"
           else
             echo "Warning: DTB files not found!"
+            # Last resort - look for DTB files anywhere
+            find . -name "*.dtb" | sort | head -5 | xargs -I{} echo "Found DTB: {}"
           fi
 
       - name: Create ZIP Files for Different Formats
