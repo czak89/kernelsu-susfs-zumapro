@@ -54,15 +54,15 @@ jobs:
 
       - name: Verify required files
         run: |
-          if [ ! -f ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ]; then
+          if [ ! -f ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ]; then
             echo "File 50_add_susfs_in_gki-android14-6.1.patch not found!"
             exit 1
           fi
-          if [ ! -d ../susfs4ksu/kernel_patches/fs ]; then
+          if [ ! -d ./susfs4ksu/kernel_patches/fs ]; then
             echo "Directory fs not found!"
             exit 1
           fi
-          if [ ! -d ../susfs4ksu/kernel_patches/include/linux ]; then
+          if [ ! -d ./susfs4ksu/kernel_patches/include/linux ]; then
             echo "Directory include/linux not found!"
             exit 1
           fi
