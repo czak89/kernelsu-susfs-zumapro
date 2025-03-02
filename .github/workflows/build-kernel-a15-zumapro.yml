@@ -24,15 +24,16 @@ jobs:
           temp-reserve-mb: 2048
           swap-size-mb: 8192
           remove-dotnet: 'true'
-          remove-android: 'false'
+          remove-android: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
 
       - name: Installing dependencies
         run: |
-          sudo apt update
-          sudo apt install -y gcc-9 g++-9
-          sudo apt install -y build-essential gcc-9-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+          sudo apt-apt update
+          sudo apt-get upgrade
+          sudo apt-get install -y gcc-9 g++-9
+          sudo apt-get install -y build-essential gcc-9-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             bc bison flex libssl-dev make libc6-dev libncurses5-dev
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90 --slave /usr/bin/g++ g++ /usr/bin/g++-9
           
@@ -52,13 +53,13 @@ jobs:
           echo "Cloning AnyKernel3 and other dependencies..."
           
           ANYKERNEL_BRANCH="gki-2.0"
-          SUSFS_BRANCH="main"
+          SUSFS_BRANCH="gki-android14-6.1"
 
           echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
           echo "Using branch for SUSFS: $SUSFS_BRANCH"
 
           git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
+          git clone https://github.com/czak89/susfs4ksu.git -b "$SUSFS_BRANCH"
           
           echo "Checking SUSFS repository structure..."
           find ./susfs4ksu -type f -name "*.patch" | grep -i susfs
