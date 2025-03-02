@@ -6,7 +6,7 @@ on:
   
 jobs:
   prepare-environment:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
       - name: Maximize build space
@@ -40,12 +40,12 @@ jobs:
           echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
           echo "Using branch for SUSFS: $SUSFS_BRANCH"
           git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
+          git clone https://github.com/czak89/susfs4ksu.git -b "$SUSFS_BRANCH"
           git clone https://github.com/TheWildJames/kernel_patches.git
           git clone https://github.com/kerneltoast/android_kernel_google_zumapro
 
   build-kernel:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: prepare-environment
 
     steps:
