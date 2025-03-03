@@ -1,5 +1,4 @@
-name: Build A15 Zuma Pro Kernel
-
+name: Claude 3.7 extended version of build Android 15 zumapro +susfs +sultan +kernelsu
 on:
   workflow_dispatch: {}
   workflow_call: {}
