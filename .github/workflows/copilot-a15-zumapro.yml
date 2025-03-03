@@ -8,6 +8,7 @@ on:
       - main
     paths:
       - '.github/workflows/copilot-a15-zumapro.yml'
+
 jobs:
   prepare-environment:
     runs-on: ubuntu-20.04
@@ -32,6 +33,7 @@ jobs:
           sudo swapoff -a
           sudo umount /mnt || true
           sudo umount /dev/sda1 || true
+          sudo umount /dev/sdb1 || true
 
       - name: Installing dependencies
         run: sudo apt-get install -y gcc-aarch64-linux-gnu --fix-missing
