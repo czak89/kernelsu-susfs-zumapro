@@ -3,7 +3,11 @@ name: Copilot version of build Android 15 zumapro +susfs +sultan +kernelsu
 on:
   workflow_dispatch:
   workflow_call:
-  
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/copilot-a15-zumapro.yml'
 jobs:
   prepare-environment:
     runs-on: ubuntu-20.04
