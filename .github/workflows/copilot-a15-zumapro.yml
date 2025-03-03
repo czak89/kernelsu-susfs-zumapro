@@ -1,4 +1,4 @@
-name: Copilot Build A15 zumapro +susfs +sultan +kernelsu
+name: Copilot version of build Android 15 zumapro +susfs +sultan +kernelsu
 
 on:
   workflow_dispatch:
@@ -22,6 +22,12 @@ jobs:
 
       - name: Update packages
         run: sudo apt-get update
+
+      - name: Fix mounted filesystem issues
+        run: |
+          sudo swapoff -a
+          sudo umount /mnt || true
+          sudo umount /dev/sda1 || true
 
       - name: Installing dependencies
         run: sudo apt-get install -y gcc-aarch64-linux-gnu --fix-missing
