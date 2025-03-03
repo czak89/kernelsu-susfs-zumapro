@@ -3,6 +3,11 @@ name: Copilot Build A15 zumapro +susfs +sultan +kernelsu
 on:
   workflow_dispatch:
   workflow_call:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/qwen25-a15-zumapro.yml'
 
 jobs:
   prepare-environment:
