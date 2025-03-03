@@ -1,37 +1,60 @@
-name: Qwen2.5 version of build Android 15 zumapro +susfs +sultan +kernelsu
+name: Copilot Build A15 zumapro +susfs +sultan +kernelsu
 
 on:
   workflow_dispatch:
   workflow_call:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/qwen25-a15-zumapro.yml'
+
 jobs:
   prepare-environment:
     runs-on: ubuntu-20.04
 
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v1
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          swap-size-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'false'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
       - name: Update packages
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu --fix-missing
+        run: sudo apt-get update
+
+      - name: Installing dependencies
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu --fix-missing
 
       - name: Set CONFIG Environment Variable
         run: echo "CONFIG=android_kernel_google_zumapro" >> $GITHUB_ENV
 
       - name: Fix permissions for workspace
-        run: chmod -R 777 ${{ github.workspace }}
+        run: sudo chmod -R 777 ${{ github.workspace }}
 
+      # Use the PAT to authenticate when cloning private repositories (if needed)
+      - name: Set up GitHub credentials
+        uses: actions/configure-gh-actions@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_PAT }}
+      
       - name: Clone AnyKernel3 and Other Dependencies
         run: |
+          echo "Cloning AnyKernel3 and other dependencies..."
           ANYKERNEL_BRANCH="gki-2.0"
           SUSFS_BRANCH="gki-android14-6.1"
-
           echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
           echo "Using branch for SUSFS: $SUSFS_BRANCH"
 
-          git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH" || true
+          git config --global credential.helper store
+          
+          # Clone repositories using the PAT, if necessary.
+          GIT_ASKPASS=$(echo -e "\n${GITHUB_PAT}"; exit 0) \
+          git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
+          GIT_ASKPASS=$(echo -e "\n${GITHUB_PAT}"; exit 0) \
           git clone https://github.com/czak89/susfs4ksu.git -b "$SUSFS_BRANCH"
+          
+          # Public repositories can be cloned directly.
           git clone https://github.com/TheWildJames/kernel_patches.git
           git clone https://github.com/kerneltoast/android_kernel_google_zumapro
 
