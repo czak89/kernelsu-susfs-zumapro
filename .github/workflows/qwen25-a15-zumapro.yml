@@ -146,13 +146,3 @@ jobs:
         with:
           name: kernel-zumapro
           path: A15_Sultan_KernelSU_SUSFS_ZumaPro.zip
-
-### This GitHub Actions workflow is designed to build an Android kernel for the Zuma Pro device, incorporating patches related to KernelSU and SUSFS. It includes steps for setting up the environment, applying necessary patches, building the kernel, and creating/uploading the resulting artifacts.
-
-### Steps Breakdown:
-
-1. **Prepare Environment**: This job sets up the development environment by installing dependencies, updating packages, and cloning repositories.
-  
-2. **Build Kernel**:
-   - Ensures that all required directories exist.
-   - Verifies that necessary files
