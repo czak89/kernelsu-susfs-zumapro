@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/build-kernel-a15-zumapro.yml'
+      - '.github/workflows/claude37-a15-zumapro.yml'
   
 jobs:
   build-kernel-a15-zumapro-kernelsu-susfs:
