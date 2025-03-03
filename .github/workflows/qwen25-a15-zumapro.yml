@@ -1,0 +1,158 @@
+name: Qwen2.5 version of build Android 15 zumapro +susfs +sultan +kernelsu
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/qwen25-a15-zumapro.yml'
+jobs:
+  prepare-environment:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: Update packages
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu --fix-missing
+
+      - name: Set CONFIG Environment Variable
+        run: echo "CONFIG=android_kernel_google_zumapro" >> $GITHUB_ENV
+
+      - name: Fix permissions for workspace
+        run: chmod -R 777 ${{ github.workspace }}
+
+      - name: Clone AnyKernel3 and Other Dependencies
+        run: |
+          ANYKERNEL_BRANCH="gki-2.0"
+          SUSFS_BRANCH="gki-android14-6.1"
+
+          echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
+          echo "Using branch for SUSFS: $SUSFS_BRANCH"
+
+          git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH" || true
+          git clone https://github.com/czak89/susfs4ksu.git -b "$SUSFS_BRANCH"
+          git clone https://github.com/TheWildJames/kernel_patches.git
+          git clone https://github.com/kerneltoast/android_kernel_google_zumapro
+
+  build-kernel:
+    runs-on: ubuntu-20.04
+    needs: prepare-environment
+
+    steps:
+      - name: Ensure CONFIG directory exists
+        run: mkdir -p ${{ github.workspace }}/$CONFIG/drivers || true
+
+      - name: Verify required files
+        run: |
+          if [ ! -f ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ]; then
+            echo "File 50_add_susfs_in_gki-android14-6.1.patch not found!"
+            exit 1
+          fi
+
+          if [ ! -d ./susfs4ksu/kernel_patches/fs ]; then
+            echo "Directory fs not found!"
+            exit 1
+          fi
+
+          if [ ! -d ./susfs4ksu/kernel_patches/include/linux ]; then
+            echo "Directory include/linux not found!"
+            exit 1
+          fi
+
+      - name: Add KernelSU
+        run: |
+          cd "$CONFIG"
+          curl -LSs https://raw.githubusercontent.com/rifsxd/KernelSU-Next/main/kernel/setup.sh | bash -
+
+      - name: Apply SUSFS Patches
+        run: |
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ./
+          cp ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+
+          cd KernelSU-Next
+          cp ../../kernel_patches/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch ./
+          patch -p1 --forward < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || true
+          cd ..
+
+          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
+
+      - name: Apply KSU Hooks
+        run: |
+          cp ../kernel_patches/new_hooks.patch ./
+          patch -p1 --fuzz=3 < ./new_hooks.patch
+
+      - name: Apply Hide Stuff Patches
+        run: |
+          cp ../kernel_patches/69_hide_stuff.patch ./
+          patch -p1 -F 3 < 69_hide_stuff.patch
+
+      - name: Apply KernelSU & SUSFS SUltan Fixes
+        run: |
+          cp ../kernel_patches/sys.c_fix.patch ./
+          patch -p1 --fuzz=3 < ./sys.c_fix.patch
+          sed -i "s/poofed_size: '%u'/poofed_size: '%llu'/g" fs/susfs.c || true
+          sed -i "s/length of string: %u/length of string: %lu/g" fs/susfs.c || true
+
+      - name: Add SUSFS Configuration Settings
+        run: |
+          echo "Adding configuration settings to zumapro_defconfig..."
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> arch/arm64/configs/zumapro_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> arch/arm64/configs/zumapro_defconfig
+
+      - name: Run sed and perl Commands
+        run: |
+          sed -i 's/CONFIG_LOCALVERSION="-Sultan"/CONFIG_LOCALVERSION="-Sultan-Wild+"/' arch/arm64/configs/zumapro_defconfig || true
+
+      - name: Build the Kernel
+        run: |
+          echo "Building the kernel..."
+          make zumapro_defconfig -j$(nproc --all)
+          make -j$(nproc --all)
+
+  create-and-upload-artifacts:
+    runs-on: ubuntu-latest
+    needs: build-kernel
+
+    steps:
+      - name: Copy Images
+        run: |
+          cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/
+          cat ./out/google-modules/soc/gs/arch/arm64/boot/dts/google/*.dtb > ../AnyKernel3/dtb || true
+
+      - name: Create ZIP Files for Different Formats
+        run: |
+          cd AnyKernel3
+          zip -r "../A15_Sultan_KernelSU_SUSFS_ZumaPro.zip" ./*
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-zumapro
+          path: A15_Sultan_KernelSU_SUSFS_ZumaPro.zip
+
+This GitHub Actions workflow is designed to build an Android kernel for the Zuma Pro device, incorporating patches related to KernelSU and SUSFS. It includes steps for setting up the environment, applying necessary patches, building the kernel, and creating/uploading the resulting artifacts.
+
+### Steps Breakdown:
+
+1. **Prepare Environment**: This job sets up the development environment by installing dependencies, updating packages, and cloning repositories.
+  
+2. **Build Kernel**:
+   - Ensures that all required directories exist.
+   - Verifies that necessary files
